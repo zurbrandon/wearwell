@@ -1,15 +1,14 @@
 {
   "expo": {
-    "name": "Outfit",
-    "slug": "Outfit",
+    "name": "Wearwell",
+    "slug": "wearwell",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "outfit",
+    "scheme": "wearwell",
     "userInterfaceStyle": "dark",
     "ios": {
-      "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.brandonarnold.outfit",
+      "bundleIdentifier": "com.brandonarnold.wearwell",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -17,10 +16,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/images/icon.png"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -35,21 +32,21 @@
         {
           "backgroundColor": "#000000",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 120
         }
       ],
       "expo-sqlite",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Outfit needs access to your photos so you can add pieces to your closet.",
-          "cameraPermission": "Outfit uses the camera to photograph pieces for your closet."
+          "photosPermission": "Wearwell needs access to your photos so you can add pieces to your closet.",
+          "cameraPermission": "Wearwell uses the camera to photograph pieces for your closet."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Outfit uses the camera to photograph pieces for your closet."
+          "cameraPermission": "Wearwell uses the camera to photograph pieces for your closet."
         }
       ],
       "expo-sharing"

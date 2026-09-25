@@ -59,7 +59,7 @@ export type ImportSummary = Record<BackupTable, number>;
 export async function importData(db: SQLiteDatabase, backup: BackupData): Promise<ImportSummary> {
   if (backup.schemaVersion > BACKUP_SCHEMA_VERSION) {
     throw new Error(
-      'This backup was made by a newer version of the app. Update Outfit and try again.'
+      'This backup was made by a newer version of the app. Update Wearwell and try again.'
     );
   }
 

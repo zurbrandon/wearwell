@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { activeFilterCount, EMPTY_FILTERS, FilterSheet, type ClosetFilters } from '@/components/filter-sheet';
 import { ItemTile } from '@/components/item-tile';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
@@ -19,7 +20,7 @@ import { Chip } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing, TabBarHeight, Type } from '@/constants/theme';
-import { listItems, type ItemFilter } from '@/db/items';
+import { allTags, listItems, type ItemFilter } from '@/db/items';
 import { useQuery } from '@/hooks/use-query';
 import { useTheme } from '@/hooks/use-theme';
 import { seedSampleCloset } from '@/lib/seed';
@@ -27,8 +28,6 @@ import { CATEGORIES, CATEGORY_EMOJI, CATEGORY_LABEL, type Category } from '@/lib
 
 const GUTTER = Spacing.three;
 const PADDING = Spacing.four;
-
-type Shelf = 'active' | 'benched';
 
 export default function ClosetScreen() {
   const theme = useTheme();
@@ -39,22 +38,31 @@ export default function ClosetScreen() {
 
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
-  const [shelf, setShelf] = useState<Shelf>('active');
+  const [filters, setFilters] = useState<ClosetFilters>(EMPTY_FILTERS);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const filterCount = activeFilterCount(filters);
 
   const filter: ItemFilter = useMemo(
     () => ({
       search,
       categories: category ? [category] : undefined,
-      bench: shelf,
+      bench: filters.includeBenched ? 'all' : 'active',
+      colors: filters.colors,
+      patterns: filters.patterns,
+      formality: filters.formality,
+      seasons: filters.seasons,
+      tags: filters.tags,
     }),
-    [search, category, shelf]
+    [search, category, filters]
   );
 
   const { data: items, loading } = useQuery((db) => listItems(db, filter), [], [
     search,
     category,
-    shelf,
+    filters,
   ]);
+  const { data: tagOptions } = useQuery((db) => allTags(db), []);
 
   const columns = width >= 700 ? 4 : 3;
   const tileWidth = (width - PADDING * 2 - GUTTER * (columns - 1)) / columns;
@@ -79,7 +87,7 @@ export default function ClosetScreen() {
               <View style={{ gap: Spacing.one }}>
                 <ThemedText style={[styles.eyebrow, { color: theme.accent }]}>
                   {items.length} {items.length === 1 ? 'PIECE' : 'PIECES'}
-                  {shelf === 'benched' ? ' BENCHED' : ''}
+                  {filterCount ? ' · FILTERED' : ''}
                 </ThemedText>
                 <ThemedText style={styles.title}>Closet</ThemedText>
               </View>
@@ -116,21 +124,50 @@ export default function ClosetScreen() {
               </View>
             </View>
 
-            <View
-              style={[
-                styles.searchBar,
-                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-              ]}>
-              <Icon name="magnifyingglass" size={16} color={theme.textTertiary} />
-              <TextInput
-                value={search}
-                onChangeText={setSearch}
-                placeholder="Search name, brand, tag"
-                placeholderTextColor={theme.textTertiary}
-                style={[styles.searchInput, { color: theme.text }]}
-                autoCorrect={false}
-                clearButtonMode="while-editing"
-              />
+            <View style={styles.searchRow}>
+              <View
+                style={[
+                  styles.searchBar,
+                  { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+                ]}>
+                <Icon name="magnifyingglass" size={16} color={theme.textTertiary} />
+                <TextInput
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Search name, brand, tag"
+                  placeholderTextColor={theme.textTertiary}
+                  style={[styles.searchInput, { color: theme.text }]}
+                  autoCorrect={false}
+                  clearButtonMode="while-editing"
+                />
+              </View>
+
+              <Pressable
+                onPress={() => setSheetOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  filterCount ? `Filters, ${filterCount} active` : 'Filters'
+                }
+                style={({ pressed }) => [
+                  styles.filterButton,
+                  {
+                    backgroundColor: filterCount ? theme.accent : theme.backgroundElement,
+                    borderColor: filterCount ? theme.accent : theme.border,
+                    opacity: pressed ? 0.75 : 1,
+                  },
+                ]}>
+                <Icon
+                  name="line.3.horizontal.decrease"
+                  size={17}
+                  color={filterCount ? theme.accentText : theme.text}
+                  weight="semibold"
+                />
+                {filterCount ? (
+                  <ThemedText style={[styles.filterCount, { color: theme.accentText }]}>
+                    {filterCount}
+                  </ThemedText>
+                ) : null}
+              </Pressable>
             </View>
 
             <ScrollView
@@ -155,42 +192,20 @@ export default function ClosetScreen() {
               ))}
             </ScrollView>
 
-            <View style={[styles.segment, { backgroundColor: theme.backgroundElement }]}>
-              {(['active', 'benched'] as Shelf[]).map((value) => (
-                <Pressable
-                  key={value}
-                  onPress={() => setShelf(value)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: shelf === value }}
-                  style={[
-                    styles.segmentItem,
-                    shelf === value && { backgroundColor: theme.surface },
-                  ]}>
-                  <ThemedText
-                    type="small"
-                    style={{
-                      fontWeight: '600',
-                      color: shelf === value ? theme.text : theme.textSecondary,
-                    }}>
-                    {value === 'active' ? 'In rotation' : 'Benched'}
-                  </ThemedText>
-                </Pressable>
-              ))}
-            </View>
           </View>
         }
         ListEmptyComponent={
-          loading ? null : shelf === 'benched' ? (
-            <EmptyState
-              icon="pause.circle"
-              title="Nothing benched"
-              body="Bench a piece to keep it out of outfit suggestions until you want it back."
-            />
-          ) : search || category ? (
+          loading ? null : search || category || filterCount ? (
             <EmptyState
               icon="magnifyingglass"
               title="No matches"
-              body="Try a different search or clear the category filter."
+              body={
+                filterCount
+                  ? 'Nothing fits every filter. Loosen one, or reset them all.'
+                  : 'Try a different search or clear the category filter.'
+              }
+              actionLabel={filterCount ? 'Reset filters' : undefined}
+              onAction={filterCount ? () => setFilters(EMPTY_FILTERS) : undefined}
             />
           ) : (
             <View>
@@ -218,6 +233,14 @@ export default function ClosetScreen() {
           <ItemTile item={item} width={tileWidth} onPress={() => router.push(`/item/${item.id}`)} />
         )}
       />
+
+      <FilterSheet
+        visible={sheetOpen}
+        filters={filters}
+        onChange={setFilters}
+        onClose={() => setSheetOpen(false)}
+        tagOptions={tagOptions}
+      />
     </View>
   );
 }
@@ -234,7 +257,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    height: 44,
+    minWidth: 44,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  filterCount: { fontSize: 13, lineHeight: 17, fontWeight: '700' },
   searchBar: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
@@ -245,16 +282,4 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 16, height: '100%' },
   filterRow: { gap: Spacing.two, paddingRight: Spacing.four },
-  segment: {
-    flexDirection: 'row',
-    padding: 4,
-    borderRadius: Radius.pill,
-    gap: 4,
-  },
-  segmentItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: Spacing.two,
-    borderRadius: Radius.pill,
-  },
 });

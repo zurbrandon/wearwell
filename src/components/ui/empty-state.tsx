@@ -32,7 +32,14 @@ export function EmptyState({
         {body}
       </ThemedText>
       {actionLabel && onAction ? (
-        <Button label={actionLabel} onPress={onAction} style={{ marginTop: Spacing.two }} />
+        // Button pins itself to flex-start when it isn't full width, so that
+        // it can't stretch inside a column — which means a centred parent has
+        // to say so explicitly.
+        <Button
+          label={actionLabel}
+          onPress={onAction}
+          style={{ marginTop: Spacing.two, alignSelf: 'center' }}
+        />
       ) : null}
     </View>
   );

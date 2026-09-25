@@ -1,7 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { toItem, type ItemRow } from '@/db/rows';
-import type { Category } from '@/lib/taxonomy';
+import type { Category, Pattern, Season } from '@/lib/taxonomy';
 import type { Item, NewItem } from '@/lib/types';
 
 const SELECT = 'SELECT * FROM items';
@@ -10,15 +10,39 @@ function newId(): string {
   return `itm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/**
+ * Faceted: values inside a group are OR-ed, groups are AND-ed. Picking White
+ * and Navy shows either colour; adding Summer narrows that to the ones that are
+ * also summer pieces.
+ */
 export type ItemFilter = {
   categories?: Category[];
   search?: string;
   /** 'active' hides benched items, 'benched' shows only them. */
   bench?: 'active' | 'benched' | 'all';
+  colors?: string[];
+  patterns?: Pattern[];
+  formality?: number[];
+  seasons?: Season[];
+  tags?: string[];
 };
 
+/**
+ * Matches one value inside a JSON array column.
+ *
+ * Quoting the needle (`"Navy"` rather than `Navy`) keeps it an exact element
+ * match, so a value can never match because it happens to be a substring of a
+ * longer one.
+ */
+function jsonArrayContains(column: string, values: string[]): { sql: string; args: string[] } {
+  return {
+    sql: `(${values.map(() => `${column} LIKE ?`).join(' OR ')})`,
+    args: values.map((value) => `%${JSON.stringify(value)}%`),
+  };
+}
+
 export async function listItems(db: SQLiteDatabase, filter: ItemFilter = {}): Promise<Item[]> {
-  const { categories, search, bench = 'active' } = filter;
+  const { categories, search, bench = 'active', colors, patterns, formality, seasons, tags } = filter;
   const where: string[] = [];
   const args: (string | number)[] = [];
 
@@ -31,6 +55,34 @@ export async function listItems(db: SQLiteDatabase, filter: ItemFilter = {}): Pr
     where.push('(name LIKE ? OR brand LIKE ? OR subcategory LIKE ? OR tags LIKE ?)');
     const like = `%${search.trim()}%`;
     args.push(like, like, like, like);
+  }
+
+  if (colors?.length) {
+    const clause = jsonArrayContains('colors', colors);
+    where.push(clause.sql);
+    args.push(...clause.args);
+  }
+
+  if (seasons?.length) {
+    const clause = jsonArrayContains('seasons', seasons);
+    where.push(clause.sql);
+    args.push(...clause.args);
+  }
+
+  if (tags?.length) {
+    const clause = jsonArrayContains('tags', tags);
+    where.push(clause.sql);
+    args.push(...clause.args);
+  }
+
+  if (patterns?.length) {
+    where.push(`pattern IN (${patterns.map(() => '?').join(', ')})`);
+    args.push(...patterns);
+  }
+
+  if (formality?.length) {
+    where.push(`formality IN (${formality.map(() => '?').join(', ')})`);
+    args.push(...formality);
   }
 
   if (bench === 'active') {

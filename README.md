@@ -1,4 +1,4 @@
-# Outfit
+# Wearwell
 
 A digital closet for iOS. Photograph and tag what you own, then build outfits by
 swiping through your own wardrobe. Everything lives on the device — there is no

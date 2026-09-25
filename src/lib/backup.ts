@@ -54,7 +54,7 @@ export async function writeBackupArchive(data: BackupData): Promise<ExportResult
     compressionOptions: { level: 1 },
   });
 
-  const filename = `outfit-backup-${stamp(data.exportedAt)}.zip`;
+  const filename = `wearwell-backup-${stamp(data.exportedAt)}.zip`;
   const destination = new File(Paths.cache, filename);
   if (destination.exists) destination.delete();
   destination.create();
@@ -87,7 +87,7 @@ export async function readBackupArchive(uri: string): Promise<ReadBackupResult> 
 
   const dataEntry = zip.file(DATA_ENTRY);
   if (!dataEntry) {
-    throw new Error("That doesn't look like an Outfit backup — no backup.json inside.");
+    throw new Error("That doesn't look like a Wearwell backup — no backup.json inside.");
   }
 
   const data = JSON.parse(await dataEntry.async('string')) as BackupData;
