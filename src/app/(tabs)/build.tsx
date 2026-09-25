@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { SFSymbol } from 'expo-symbols';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
@@ -15,7 +15,7 @@ import { Chip } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing, TabBarHeight, Type } from '@/constants/theme';
-import { benchItem, listItems } from '@/db/items';
+import { benchItem, getItem, listItems } from '@/db/items';
 import { activeOutfitItemIds, createOutfit } from '@/db/outfits';
 import { useQuery } from '@/hooks/use-query';
 import { useTheme } from '@/hooks/use-theme';
@@ -92,6 +92,32 @@ export default function BuildScreen() {
   /** Set when a slot is reopened from the track, overriding the normal order. */
   const [focused, setFocused] = useState<Slot | null>(null);
   const [topScope, setTopScope] = useState<TopScope>('all');
+
+  /**
+   * "Start an outfit" from a piece arrives as `start=<itemId>:<nonce>`. The
+   * nonce makes each tap a distinct value, so starting from the same piece
+   * twice seeds twice — a bare id would look unchanged the second time.
+   */
+  const { start } = useLocalSearchParams<{ start?: string }>();
+  const startItemId = start?.split(':')[0] || null;
+  const { data: startItem } = useQuery(
+    (d) => (startItemId ? getItem(d, startItemId) : Promise.resolve(null)),
+    null as Item | null,
+    [startItemId]
+  );
+  const [seededFrom, setSeededFrom] = useState<string | null>(null);
+
+  // Adjusting state during render rather than in an effect: this is the
+  // documented way to react to a changed prop, and it seeds before the first
+  // paint so the deck never flashes an unseeded state.
+  if (start && startItem && seededFrom !== start) {
+    setSeededFrom(start);
+    setPicks([{ slot: coversSlots(startItem.category)[0], item: startItem }]);
+    setSkipped([]);
+    setPassedIds([]);
+    setFocused(null);
+    setTopScope('all');
+  }
   const [seed, setSeed] = useState(1);
   const [saving, setSaving] = useState(false);
 

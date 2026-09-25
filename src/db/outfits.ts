@@ -151,6 +151,40 @@ export async function markWorn(db: SQLiteDatabase, id: string): Promise<void> {
   });
 }
 
+/**
+ * Outfits a given piece appears in, newest first — the reverse of
+ * `outfit.entries`, so an item can point back at where it's worn.
+ */
+export async function outfitsForItem(db: SQLiteDatabase, itemId: string): Promise<Outfit[]> {
+  const rows = await db.getAllAsync<OutfitRow>(
+    `SELECT o.* FROM outfit_items oi
+       JOIN outfits o ON o.id = oi.outfit_id
+      WHERE oi.item_id = ?
+      ORDER BY o.created_at DESC`,
+    [itemId]
+  );
+  if (!rows.length) return [];
+
+  const ids = rows.map((r) => r.id);
+  const joins = await db.getAllAsync<ItemRow & { outfit_id: string; slot: string }>(
+    `SELECT oi.outfit_id, oi.slot, i.*
+       FROM outfit_items oi
+       JOIN items i ON i.id = oi.item_id
+      WHERE oi.outfit_id IN (${ids.map(() => '?').join(', ')})
+      ORDER BY oi.position ASC`,
+    ids
+  );
+
+  const entries = new Map<string, OutfitEntry[]>();
+  for (const join of joins) {
+    const list = entries.get(join.outfit_id) ?? [];
+    list.push({ slot: join.slot as Slot, item: toItem(join) });
+    entries.set(join.outfit_id, list);
+  }
+
+  return rows.map((row) => ({ ...toOutfit(row), entries: entries.get(row.id) ?? [] }));
+}
+
 /** Item ids already used by outfits in the working set, for variety scoring. */
 export async function activeOutfitItemIds(db: SQLiteDatabase): Promise<Set<string>> {
   const rows = await db.getAllAsync<{ item_id: string }>(

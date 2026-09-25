@@ -1,14 +1,16 @@
 import * as Haptics from 'expo-haptics';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useState } from 'react';
 import { useSQLiteContext } from 'expo-sqlite';
-import { ActionSheetIOS, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { CapsulePicker } from '@/components/capsule-picker';
 import { ItemImage } from '@/components/item-image';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing } from '@/constants/theme';
-import { addOutfitsToCapsule, capsulesForOutfit, createCapsule, listCapsules } from '@/db/capsules';
+import { capsulesForOutfit, listCapsules } from '@/db/capsules';
 import {
   archiveOutfit,
   deleteOutfit,
@@ -31,6 +33,7 @@ export default function OutfitScreen() {
   const { data: outfit, loading } = useQuery((d) => getOutfit(d, id), null as Outfit | null, [id]);
   const { data: capsules } = useQuery((d) => listCapsules(d), [] as Capsule[]);
   const { data: memberOf } = useQuery((d) => capsulesForOutfit(d, id), [] as string[], [id]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   if (loading || !outfit) {
     return <View style={{ flex: 1, backgroundColor: theme.background }} />;
@@ -39,58 +42,6 @@ export default function OutfitScreen() {
   const archived = outfit.archivedAt != null;
   const inCapsules = capsules.filter((capsule) => memberOf.includes(capsule.id));
 
-  function promptAddToCapsule() {
-    if (!outfit) return;
-    const available = capsules.filter((capsule) => !memberOf.includes(capsule.id));
-
-    const create = () =>
-      Alert.prompt(
-        'New capsule',
-        'Name it for the trip or occasion.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Create',
-            onPress: async (name?: string) => {
-              if (!name?.trim()) return;
-              const capsuleId = await createCapsule(db, name);
-              await addOutfitsToCapsule(db, capsuleId, [outfit.id]);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            },
-          },
-        ],
-        'plain-text'
-      );
-
-    if (!available.length) {
-      create();
-      return;
-    }
-
-    const labels = available.map((capsule) => capsule.name);
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { title: 'Add to capsule', options: ['Cancel', ...labels, 'New capsule…'], cancelButtonIndex: 0 },
-        (index) => {
-          if (index === 0) return;
-          if (index === labels.length + 1) return create();
-          addOutfitsToCapsule(db, available[index - 1].id, [outfit.id]);
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
-      );
-      return;
-    }
-
-    Alert.alert('Add to capsule', undefined, [
-      ...available.map((capsule) => ({
-        text: capsule.name,
-        onPress: () => addOutfitsToCapsule(db, capsule.id, [outfit.id]),
-      })),
-      { text: 'New capsule…', onPress: create },
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
-  }
 
   function confirmDelete() {
     if (!outfit) return;
@@ -199,11 +150,11 @@ export default function OutfitScreen() {
           ) : null}
 
           <Button
-            label="Add to capsule"
+            label={inCapsules.length ? 'Edit capsules' : 'Add to a capsule'}
             icon="suitcase.fill"
             variant="secondary"
             fullWidth
-            onPress={promptAddToCapsule}
+            onPress={() => setPickerOpen(true)}
           />
           <Button
             label="I wore this"
@@ -224,6 +175,12 @@ export default function OutfitScreen() {
           <Button label="Delete" variant="danger" fullWidth onPress={confirmDelete} />
         </View>
       </ScrollView>
+
+      <CapsulePicker
+        outfitId={id}
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+      />
     </>
   );
 }

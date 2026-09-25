@@ -7,17 +7,19 @@ import { ActionSheetIOS, Alert, Platform, Pressable, ScrollView, StyleSheet, Vie
 
 import { ItemImage } from '@/components/item-image';
 import { ItemForm, type ItemDraft } from '@/components/item-form';
+import { OutfitCard } from '@/components/outfit-card';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
 import { Chip } from '@/components/ui/chip';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing, Type } from '@/constants/theme';
 import { allTags, benchItem, deleteItem, getItem, unbenchItem, updateItem } from '@/db/items';
+import { outfitsForItem } from '@/db/outfits';
 import { useQuery } from '@/hooks/use-query';
 import { useTheme } from '@/hooks/use-theme';
 import { deleteImage } from '@/lib/photos';
 import { CATEGORY_LABEL, FORMALITY_LABEL, colorHex } from '@/lib/taxonomy';
-import { isBenched, type Item } from '@/lib/types';
+import { isBenched, type Item, type Outfit } from '@/lib/types';
 
 const DAY = 864e5;
 
@@ -48,6 +50,7 @@ export default function ItemScreen() {
 
   const { data: item, loading } = useQuery((d) => getItem(d, id), null as Item | null, [id]);
   const { data: tags } = useQuery((d) => allTags(d), []);
+  const { data: wornIn } = useQuery((d) => outfitsForItem(d, id), [] as Outfit[], [id]);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ItemDraft | null>(null);
@@ -238,14 +241,26 @@ export default function ItemScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.actionRow}>
+          <Button
+            label="Start an outfit"
+            icon="wand.and.stars"
+            onPress={() =>
+              router.navigate({
+                pathname: '/build',
+                // Nonce so starting from the same piece twice still seeds.
+                params: { start: `${item.id}:${Date.now()}` },
+              })
+            }
+          />
           {benched ? (
             <Button
               label="Bring back"
               icon="arrow.uturn.backward"
+              variant="secondary"
               onPress={() => unbenchItem(db, item.id)}
             />
           ) : (
-            <Button label="Bench" icon="pause.circle" onPress={promptBench} />
+            <Button label="Bench" icon="pause.circle" variant="secondary" onPress={promptBench} />
           )}
           <Button label="Edit" icon="pencil" variant="secondary" onPress={() => startEditing(item)} />
           <Button label="Delete" icon="trash" variant="danger" onPress={confirmDelete} />
@@ -292,6 +307,21 @@ export default function ItemScreen() {
               <Chip key={t} label={t} size="sm" />
             ))}
           </Group>
+        ) : null}
+
+        {wornIn.length ? (
+          <View style={{ gap: Spacing.three }}>
+            <ThemedText style={styles.factLabel} themeColor="textTertiary">
+              In {wornIn.length} {wornIn.length === 1 ? 'outfit' : 'outfits'}
+            </ThemedText>
+            {wornIn.map((outfit) => (
+              <OutfitCard
+                key={outfit.id}
+                outfit={outfit}
+                onPress={() => router.push(`/outfit/${outfit.id}`)}
+              />
+            ))}
+          </View>
         ) : null}
 
         {item.notes ? (
