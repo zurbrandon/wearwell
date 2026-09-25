@@ -19,7 +19,10 @@
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/images/icon.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "output": "static",
@@ -46,7 +49,9 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Wearwell uses the camera to photograph pieces for your closet."
+          "cameraPermission": "Wearwell uses the camera to photograph pieces for your closet.",
+          "microphonePermission": false,
+          "recordAudioAndroidPermission": false
         }
       ],
       "expo-sharing"
@@ -54,6 +59,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7d7a40d9-6ebe-4938-9dba-f286f3a25427"
+      }
+    },
+    "owner": "brandonarnold"
   }
 }
