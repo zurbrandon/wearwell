@@ -37,6 +37,13 @@ import type { Item } from '@/lib/types';
 
 type Pick = { slot: Slot; item: Item };
 
+/**
+ * Vertical air inside the deck stage. `onLayout` reports the border box, so
+ * the card's height budget has to subtract this or the card ends up taller
+ * than the space it sits in and spills onto the controls below.
+ */
+const STAGE_PADDING = Spacing.three;
+
 /** Which slot filters the step-one deck, when the closet holds one-pieces. */
 type TopScope = 'all' | 'top' | 'onepiece';
 
@@ -152,7 +159,7 @@ export default function BuildScreen() {
 
   const [stage, setStage] = useState({ width: 0, height: 0 });
   const cardWidth = Math.min(stage.width - Spacing.four * 2, 460);
-  const cardHeight = Math.min(cardWidth * 1.45, stage.height);
+  const cardHeight = Math.min(cardWidth * 1.45, stage.height - STAGE_PADDING * 2);
 
   const covered = coveredSlots(picks);
   const essentialsMet = covered.has('top') && covered.has('bottom');
@@ -370,22 +377,26 @@ export default function BuildScreen() {
               <Hint icon="arrow.right" label="Pick" />
             </View>
 
-            <View style={styles.actionRow}>
-              {OPTIONAL_SLOTS.has(slot) ? (
-                <Button
-                  label={SLOT_SKIP_LABEL[slot]}
-                  variant="secondary"
-                  size="sm"
-                  onPress={() => skip(slot)}
-                />
-              ) : (
-                <View />
-              )}
+            {/* Only take up room when there's actually something in it — an
+                empty row still reserved its height, stealing it from the deck. */}
+            {OPTIONAL_SLOTS.has(slot) || essentialsMet ? (
+              <View style={styles.actionRow}>
+                {OPTIONAL_SLOTS.has(slot) ? (
+                  <Button
+                    label={SLOT_SKIP_LABEL[slot]}
+                    variant="secondary"
+                    size="sm"
+                    onPress={() => skip(slot)}
+                  />
+                ) : (
+                  <View />
+                )}
 
-              {essentialsMet ? (
-                <Button label="Save outfit" size="sm" loading={saving} onPress={save} />
-              ) : null}
-            </View>
+                {essentialsMet ? (
+                  <Button label="Save outfit" size="sm" loading={saving} onPress={save} />
+                ) : null}
+              </View>
+            ) : null}
           </>
         )}
       </View>
@@ -555,8 +566,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   trackLabel: { ...Type.label, textTransform: 'uppercase', textAlign: 'center' },
-  scopeRow: { flexDirection: 'row', gap: Spacing.two, paddingHorizontal: Spacing.four, paddingTop: Spacing.three },
-  stage: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.three },
+  scopeRow: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.five,
+    paddingBottom: Spacing.three,
+  },
+  stage: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: STAGE_PADDING },
   exhausted: {
     alignItems: 'center',
     gap: Spacing.three,
@@ -565,7 +582,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderStyle: 'dashed',
   },
-  controls: { paddingHorizontal: Spacing.four, gap: Spacing.three },
+  controls: { paddingHorizontal: Spacing.four, gap: Spacing.three, paddingTop: Spacing.four },
   // (bottom padding is applied inline from the safe-area inset)
   hintRow: { flexDirection: 'row', justifyContent: 'center', gap: Spacing.five },
   hint: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
