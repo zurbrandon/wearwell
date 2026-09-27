@@ -200,6 +200,34 @@ export async function capsuleItems(db: SQLiteDatabase, capsuleId: string): Promi
   return rows.map(toItem);
 }
 
+/** Suggestion signatures the user has thrown away for this capsule. */
+export async function dismissedSuggestions(
+  db: SQLiteDatabase,
+  capsuleId: string
+): Promise<string[]> {
+  const rows = await db.getAllAsync<{ signature: string }>(
+    'SELECT signature FROM capsule_dismissed WHERE capsule_id = ?',
+    [capsuleId]
+  );
+  return rows.map((r) => r.signature);
+}
+
+export async function dismissSuggestion(
+  db: SQLiteDatabase,
+  capsuleId: string,
+  signature: string
+): Promise<void> {
+  await db.runAsync(
+    'INSERT OR IGNORE INTO capsule_dismissed (capsule_id, signature, dismissed_at) VALUES (?, ?, ?)',
+    [capsuleId, signature, Date.now()]
+  );
+}
+
+/** Bring dismissed suggestions back — for when a capsule has run dry. */
+export async function clearDismissed(db: SQLiteDatabase, capsuleId: string): Promise<void> {
+  await db.runAsync('DELETE FROM capsule_dismissed WHERE capsule_id = ?', [capsuleId]);
+}
+
 /** Item ids already ticked off this capsule's packing list. */
 export async function packedItems(db: SQLiteDatabase, capsuleId: string): Promise<string[]> {
   const rows = await db.getAllAsync<{ item_id: string }>(

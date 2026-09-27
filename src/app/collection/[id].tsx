@@ -1,10 +1,11 @@
 import * as Haptics from 'expo-haptics';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { ItemImage } from '@/components/item-image';
+import { SuggestionDeck, type SuggestionAction } from '@/components/suggestion-deck';
 import { OutfitCard, type OutfitCardAction } from '@/components/outfit-card';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
@@ -12,16 +13,28 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing, Type } from '@/constants/theme';
 import {
+  addOutfitsToCapsule,
   capsuleItems,
+  clearDismissed,
   deleteCapsule,
+  dismissedSuggestions,
+  dismissSuggestion,
   packedItems,
   removeOutfitFromCapsule,
   renameCapsule,
   resetPacked,
   setPacked,
 } from '@/db/capsules';
+import { listItems } from '@/db/items';
+import { suggestOutfits, type Suggestion } from '@/lib/suggest';
 import { collectionOutfits, getCollection } from '@/db/collections';
-import { archiveOutfits, clearableCount, restoreOutfit, setFavorite } from '@/db/outfits';
+import {
+  archiveOutfits,
+  clearableCount,
+  createOutfit,
+  restoreOutfit,
+  setFavorite,
+} from '@/db/outfits';
 import { useQuery } from '@/hooks/use-query';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -47,6 +60,9 @@ export default function CollectionScreen() {
   const router = useRouter();
 
   const kind = collectionKind(id);
+  const { width: screenWidth } = useWindowDimensions();
+  const suggestionWidth = Math.min(screenWidth - Spacing.four * 2, 460);
+  const suggestionHeight = Math.round(suggestionWidth * 0.62);
   const isCapsule = kind === 'capsule';
 
   const [view, setView] = useState<'outfits' | 'packing'>('outfits');
@@ -67,6 +83,24 @@ export default function CollectionScreen() {
     [] as string[],
     [id, isCapsule]
   );
+  const { data: wardrobe } = useQuery(
+    (d) => (isCapsule ? listItems(d, { bench: 'active' }) : Promise.resolve([])),
+    [] as Item[],
+    [id, isCapsule]
+  );
+  const { data: dismissed } = useQuery(
+    (d) => (isCapsule ? dismissedSuggestions(d, id) : Promise.resolve([])),
+    [] as string[],
+    [id, isCapsule]
+  );
+
+  const suggestions = useMemo(
+    () =>
+      isCapsule && wardrobe.length
+        ? suggestOutfits({ wardrobe, existing: outfits, dismissed, count: 3 })
+        : [],
+    [isCapsule, wardrobe, outfits, dismissed]
+  );
 
   if (loading || !collection) {
     return <View style={{ flex: 1, backgroundColor: theme.background }} />;
@@ -76,6 +110,19 @@ export default function CollectionScreen() {
   const packedCount = items.filter((item) => packed.has(item.id)).length;
   const allPacked = items.length > 0 && packedCount === items.length;
   const packing = groupForPacking(items);
+
+  async function onSuggestion(action: SuggestionAction, suggestion: Suggestion) {
+    if (action === 'dismiss') {
+      await dismissSuggestion(db, id, suggestion.id);
+      return;
+    }
+    const outfitId = await createOutfit(
+      db,
+      suggestion.entries.map((e) => ({ slot: e.slot, itemId: e.item.id }))
+    );
+    await addOutfitsToCapsule(db, id, [outfitId]);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
 
   function togglePacked(item: Item) {
     Haptics.selectionAsync();
@@ -241,6 +288,47 @@ export default function CollectionScreen() {
           </View>
         ) : null}
 
+        {isCapsule && view === 'outfits' && suggestions.length ? (
+          <View style={{ gap: Spacing.three }}>
+            <View style={styles.progressRow}>
+              <ThemedText style={[styles.groupLabel, { color: theme.textTertiary }]}>
+                SUGGESTED
+              </ThemedText>
+              {dismissed.length ? (
+                <Pressable onPress={() => clearDismissed(db, id)} hitSlop={10} accessibilityRole="button">
+                  <ThemedText type="small" style={{ color: theme.accent, fontWeight: '600' }}>
+                    Bring back {dismissed.length}
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+            </View>
+
+            <View style={{ height: suggestionHeight }}>
+              <SuggestionDeck
+                suggestions={suggestions}
+                width={suggestionWidth}
+                height={suggestionHeight}
+                onAction={onSuggestion}
+              />
+            </View>
+
+            <View style={styles.hintRow}>
+              <View style={styles.hint}>
+                <Icon name="arrow.left" size={12} color={theme.textTertiary} />
+                <ThemedText type="small" themeColor="textTertiary" style={{ fontSize: 12 }}>
+                  Nope
+                </ThemedText>
+              </View>
+              <View style={styles.hint}>
+                <Icon name="arrow.right" size={12} color={theme.textTertiary} />
+                <ThemedText type="small" themeColor="textTertiary" style={{ fontSize: 12 }}>
+                  Add to capsule
+                </ThemedText>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
         {!outfits.length ? (
           <EmptyState
             icon={COLLECTION_SYMBOL[kind]}
@@ -357,6 +445,8 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
   },
   progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  hintRow: { flexDirection: 'row', justifyContent: 'center', gap: Spacing.five },
+  hint: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
   packRow: {
     flexDirection: 'row',
     alignItems: 'center',

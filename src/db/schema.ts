@@ -9,7 +9,7 @@ export const DATABASE_NAME = 'closet.db';
  * Bump this and append a case to `migrate` for every schema change.
  * Migrations run inside a transaction on app start.
  */
-const LATEST_VERSION = 3;
+const LATEST_VERSION = 4;
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL;');
@@ -120,6 +120,21 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
       );
     `);
     version = 3;
+  }
+
+  if (version === 3) {
+    // Keyed by a signature derived from the item ids rather than an outfit id,
+    // because a dismissed suggestion was never an outfit — it's a combination
+    // the user has said no to, and it must stay said-no-to across sessions.
+    await db.execAsync(`
+      CREATE TABLE capsule_dismissed (
+        capsule_id   TEXT NOT NULL REFERENCES capsules (id) ON DELETE CASCADE,
+        signature    TEXT NOT NULL,
+        dismissed_at INTEGER NOT NULL,
+        PRIMARY KEY (capsule_id, signature)
+      );
+    `);
+    version = 4;
   }
 
   await db.execAsync(`PRAGMA user_version = ${version}`);
