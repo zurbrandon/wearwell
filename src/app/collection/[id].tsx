@@ -45,6 +45,14 @@ import {
 import { CATEGORY_LABEL, type Category } from '@/lib/taxonomy';
 import type { Collection, Item, Outfit } from '@/lib/types';
 
+type CapsuleView = 'outfits' | 'packing' | 'suggested';
+
+const VIEW_LABEL: Record<CapsuleView, string> = {
+  outfits: 'Outfits',
+  packing: 'Packing',
+  suggested: 'Suggested',
+};
+
 /** Packing list grouped the way you'd actually lay things out. */
 function groupForPacking(items: Item[]): { category: Category; items: Item[] }[] {
   const order: Category[] = ['onepiece', 'top', 'bottom', 'outerwear', 'shoes', 'accessory'];
@@ -62,10 +70,12 @@ export default function CollectionScreen() {
   const kind = collectionKind(id);
   const { width: screenWidth } = useWindowDimensions();
   const suggestionWidth = Math.min(screenWidth - Spacing.four * 2, 460);
-  const suggestionHeight = Math.round(suggestionWidth * 0.62);
+  // Taller now that the deck has a tab to itself rather than sharing the
+  // outfits list, so each garment strip is actually legible.
+  const suggestionHeight = Math.round(suggestionWidth * 0.82);
   const isCapsule = kind === 'capsule';
 
-  const [view, setView] = useState<'outfits' | 'packing'>('outfits');
+  const [view, setView] = useState<CapsuleView>('outfits');
 
   const { data: collection, loading } = useQuery(
     (d) => getCollection(d, id),
@@ -266,9 +276,9 @@ export default function CollectionScreen() {
           />
         ) : null}
 
-        {isCapsule && outfits.length ? (
+        {isCapsule ? (
           <View style={[styles.segment, { backgroundColor: theme.backgroundElement }]}>
-            {(['outfits', 'packing'] as const).map((value) => (
+            {(['outfits', 'packing', 'suggested'] as const).map((value) => (
               <Pressable
                 key={value}
                 onPress={() => setView(value)}
@@ -281,55 +291,70 @@ export default function CollectionScreen() {
                     fontWeight: '600',
                     color: view === value ? theme.text : theme.textSecondary,
                   }}>
-                  {value === 'outfits' ? 'Outfits' : 'Packing list'}
+                  {VIEW_LABEL[value]}
                 </ThemedText>
               </Pressable>
             ))}
           </View>
         ) : null}
 
-        {isCapsule && view === 'outfits' && suggestions.length ? (
-          <View style={{ gap: Spacing.three }}>
-            <View style={styles.progressRow}>
-              <ThemedText style={[styles.groupLabel, { color: theme.textTertiary }]}>
-                SUGGESTED
-              </ThemedText>
-              {dismissed.length ? (
-                <Pressable onPress={() => clearDismissed(db, id)} hitSlop={10} accessibilityRole="button">
-                  <ThemedText type="small" style={{ color: theme.accent, fontWeight: '600' }}>
-                    Bring back {dismissed.length}
+        {isCapsule && view === 'suggested' ? (
+          suggestions.length ? (
+            <View style={{ gap: Spacing.three }}>
+              <View style={styles.progressRow}>
+                <ThemedText style={[styles.groupLabel, { color: theme.textTertiary }]}>
+                  {suggestions.length} {suggestions.length === 1 ? 'IDEA' : 'IDEAS'}
+                </ThemedText>
+                {dismissed.length ? (
+                  <Pressable
+                    onPress={() => clearDismissed(db, id)}
+                    hitSlop={10}
+                    accessibilityRole="button">
+                    <ThemedText type="small" style={{ color: theme.accent, fontWeight: '600' }}>
+                      Bring back {dismissed.length}
+                    </ThemedText>
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <View style={{ height: suggestionHeight }}>
+                <SuggestionDeck
+                  suggestions={suggestions}
+                  width={suggestionWidth}
+                  height={suggestionHeight}
+                  onAction={onSuggestion}
+                />
+              </View>
+
+              <View style={styles.hintRow}>
+                <View style={styles.hint}>
+                  <Icon name="arrow.left" size={12} color={theme.textTertiary} />
+                  <ThemedText type="small" themeColor="textTertiary" style={{ fontSize: 12 }}>
+                    Nope
                   </ThemedText>
-                </Pressable>
-              ) : null}
-            </View>
-
-            <View style={{ height: suggestionHeight }}>
-              <SuggestionDeck
-                suggestions={suggestions}
-                width={suggestionWidth}
-                height={suggestionHeight}
-                onAction={onSuggestion}
-              />
-            </View>
-
-            <View style={styles.hintRow}>
-              <View style={styles.hint}>
-                <Icon name="arrow.left" size={12} color={theme.textTertiary} />
-                <ThemedText type="small" themeColor="textTertiary" style={{ fontSize: 12 }}>
-                  Nope
-                </ThemedText>
-              </View>
-              <View style={styles.hint}>
-                <Icon name="arrow.right" size={12} color={theme.textTertiary} />
-                <ThemedText type="small" themeColor="textTertiary" style={{ fontSize: 12 }}>
-                  Add to capsule
-                </ThemedText>
+                </View>
+                <View style={styles.hint}>
+                  <Icon name="arrow.right" size={12} color={theme.textTertiary} />
+                  <ThemedText type="small" themeColor="textTertiary" style={{ fontSize: 12 }}>
+                    Add to capsule
+                  </ThemedText>
+                </View>
               </View>
             </View>
-          </View>
-        ) : null}
-
-        {!outfits.length ? (
+          ) : (
+            <EmptyState
+              icon="wand.and.stars"
+              title={dismissed.length ? 'Out of ideas' : 'Nothing to suggest'}
+              body={
+                dismissed.length
+                  ? "You've turned everything down. Bring them back to take another look."
+                  : 'Add more pieces to your closet, and combinations that suit this capsule will show up here.'
+              }
+              actionLabel={dismissed.length ? `Bring back ${dismissed.length}` : undefined}
+              onAction={dismissed.length ? () => clearDismissed(db, id) : undefined}
+            />
+          )
+        ) : !outfits.length ? (
           <EmptyState
             icon={COLLECTION_SYMBOL[kind]}
             title={isCapsule ? 'Nothing in here yet' : 'Nothing here yet'}
