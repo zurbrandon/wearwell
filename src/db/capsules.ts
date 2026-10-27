@@ -23,28 +23,39 @@ type CapsuleRow = {
  * only needs totals, and `item_count` is a DISTINCT across the capsule's
  * outfits so a shirt worn in three looks is packed once.
  */
-const LIST_SQL = `
+const CAPSULE_SELECT = `
   SELECT c.*,
-         (SELECT COUNT(*) FROM capsule_outfits co WHERE co.capsule_id = c.id) AS outfit_count,
+         (SELECT COUNT(*) FROM capsule_outfits co
+            JOIN outfits o ON o.id = co.outfit_id
+           WHERE co.capsule_id = c.id
+             AND co.deleted_at IS NULL AND o.deleted_at IS NULL) AS outfit_count,
          (SELECT COUNT(DISTINCT oi.item_id)
             FROM capsule_outfits co
+            JOIN outfits o ON o.id = co.outfit_id
             JOIN outfit_items oi ON oi.outfit_id = co.outfit_id
-           WHERE co.capsule_id = c.id) AS item_count
+            JOIN items i ON i.id = oi.item_id
+           WHERE co.capsule_id = c.id
+             AND co.deleted_at IS NULL AND o.deleted_at IS NULL
+             AND i.deleted_at IS NULL) AS item_count
     FROM capsules c
-   ORDER BY c.updated_at DESC
+   WHERE c.deleted_at IS NULL
 `;
 
 export async function listCapsules(db: SQLiteDatabase): Promise<Capsule[]> {
-  const rows = await db.getAllAsync<CapsuleRow>(LIST_SQL);
+  const rows = await db.getAllAsync<CapsuleRow>(
+    `${CAPSULE_SELECT} ORDER BY c.updated_at DESC`
+  );
   if (!rows.length) return [];
 
   // One extra query for cover art across every capsule, rather than per row.
   const previews = await db.getAllAsync<{ capsule_id: string; image_uri: string | null }>(
     `SELECT co.capsule_id, i.image_uri
        FROM capsule_outfits co
+       JOIN outfits o ON o.id = co.outfit_id
        JOIN outfit_items oi ON oi.outfit_id = co.outfit_id
        JOIN items i ON i.id = oi.item_id
       WHERE i.image_uri IS NOT NULL
+        AND co.deleted_at IS NULL AND o.deleted_at IS NULL AND i.deleted_at IS NULL
       ORDER BY co.added_at DESC, oi.position ASC`
   );
 
@@ -71,7 +82,7 @@ export async function listCapsules(db: SQLiteDatabase): Promise<Capsule[]> {
 
 export async function getCapsule(db: SQLiteDatabase, id: string): Promise<Capsule | null> {
   const row = await db.getFirstAsync<CapsuleRow>(
-    LIST_SQL.replace('ORDER BY c.updated_at DESC', 'WHERE c.id = ?'),
+    `${CAPSULE_SELECT} AND c.id = ?`,
     [id]
   );
   if (!row) return null;
@@ -79,9 +90,11 @@ export async function getCapsule(db: SQLiteDatabase, id: string): Promise<Capsul
   const previews = await db.getAllAsync<{ image_uri: string }>(
     `SELECT DISTINCT i.image_uri
        FROM capsule_outfits co
+       JOIN outfits o ON o.id = co.outfit_id
        JOIN outfit_items oi ON oi.outfit_id = co.outfit_id
        JOIN items i ON i.id = oi.item_id
       WHERE co.capsule_id = ? AND i.image_uri IS NOT NULL
+        AND co.deleted_at IS NULL AND o.deleted_at IS NULL AND i.deleted_at IS NULL
       LIMIT 4`,
     [id]
   );
@@ -116,8 +129,10 @@ export async function renameCapsule(db: SQLiteDatabase, id: string, name: string
   ]);
 }
 
+/** Soft delete — see deleteItem in items.ts for why. */
 export async function deleteCapsule(db: SQLiteDatabase, id: string): Promise<void> {
-  await db.runAsync('DELETE FROM capsules WHERE id = ?', [id]);
+  const now = Date.now();
+  await db.runAsync('UPDATE capsules SET deleted_at = ?, updated_at = ? WHERE id = ?', [now, now, id]);
 }
 
 /** Adding is idempotent, so re-adding from a picker can't fail. */
@@ -132,8 +147,11 @@ export async function addOutfitsToCapsule(
   await db.withTransactionAsync(async () => {
     for (const outfitId of outfitIds) {
       await db.runAsync(
-        'INSERT OR IGNORE INTO capsule_outfits (capsule_id, outfit_id, added_at) VALUES (?, ?, ?)',
-        [capsuleId, outfitId, now]
+        `INSERT INTO capsule_outfits (capsule_id, outfit_id, added_at, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (capsule_id, outfit_id) DO UPDATE SET
+           deleted_at = NULL, added_at = excluded.added_at, updated_at = excluded.updated_at`,
+        [capsuleId, outfitId, now, now]
       );
     }
     await db.runAsync('UPDATE capsules SET updated_at = ? WHERE id = ?', [now, capsuleId]);
@@ -146,10 +164,12 @@ export async function removeOutfitFromCapsule(
   outfitId: string
 ): Promise<void> {
   await db.withTransactionAsync(async () => {
-    await db.runAsync('DELETE FROM capsule_outfits WHERE capsule_id = ? AND outfit_id = ?', [
-      capsuleId,
-      outfitId,
-    ]);
+    const now = Date.now();
+    await db.runAsync(
+      `UPDATE capsule_outfits SET deleted_at = ?, updated_at = ?
+        WHERE capsule_id = ? AND outfit_id = ?`,
+      [now, now, capsuleId, outfitId]
+    );
     await db.runAsync('UPDATE capsules SET updated_at = ? WHERE id = ?', [Date.now(), capsuleId]);
   });
 }
@@ -163,6 +183,7 @@ export async function capsuleOutfits(db: SQLiteDatabase, capsuleId: string): Pro
     `SELECT o.* FROM capsule_outfits co
        JOIN outfits o ON o.id = co.outfit_id
       WHERE co.capsule_id = ?
+        AND co.deleted_at IS NULL AND o.deleted_at IS NULL
       ORDER BY co.added_at DESC`,
     [capsuleId]
   );
@@ -174,6 +195,7 @@ export async function capsuleOutfits(db: SQLiteDatabase, capsuleId: string): Pro
        FROM outfit_items oi
        JOIN items i ON i.id = oi.item_id
       WHERE oi.outfit_id IN (${ids.map(() => '?').join(', ')})
+        AND i.deleted_at IS NULL
       ORDER BY oi.position ASC`,
     ids
   );
@@ -192,9 +214,11 @@ export async function capsuleOutfits(db: SQLiteDatabase, capsuleId: string): Pro
 export async function capsuleItems(db: SQLiteDatabase, capsuleId: string): Promise<Item[]> {
   const rows = await db.getAllAsync<ItemRow>(
     `SELECT DISTINCT i.* FROM capsule_outfits co
+       JOIN outfits o ON o.id = co.outfit_id
        JOIN outfit_items oi ON oi.outfit_id = co.outfit_id
        JOIN items i ON i.id = oi.item_id
-      WHERE co.capsule_id = ?`,
+      WHERE co.capsule_id = ?
+        AND co.deleted_at IS NULL AND o.deleted_at IS NULL AND i.deleted_at IS NULL`,
     [capsuleId]
   );
   return rows.map(toItem);
@@ -206,7 +230,7 @@ export async function dismissedSuggestions(
   capsuleId: string
 ): Promise<string[]> {
   const rows = await db.getAllAsync<{ signature: string }>(
-    'SELECT signature FROM capsule_dismissed WHERE capsule_id = ?',
+    'SELECT signature FROM capsule_dismissed WHERE capsule_id = ? AND deleted_at IS NULL',
     [capsuleId]
   );
   return rows.map((r) => r.signature);
@@ -218,20 +242,28 @@ export async function dismissSuggestion(
   signature: string
 ): Promise<void> {
   await db.runAsync(
-    'INSERT OR IGNORE INTO capsule_dismissed (capsule_id, signature, dismissed_at) VALUES (?, ?, ?)',
-    [capsuleId, signature, Date.now()]
+    `INSERT INTO capsule_dismissed (capsule_id, signature, dismissed_at, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (capsule_id, signature) DO UPDATE SET
+       deleted_at = NULL, dismissed_at = excluded.dismissed_at, updated_at = excluded.updated_at`,
+    [capsuleId, signature, Date.now(), Date.now()]
   );
 }
 
 /** Bring dismissed suggestions back — for when a capsule has run dry. */
 export async function clearDismissed(db: SQLiteDatabase, capsuleId: string): Promise<void> {
-  await db.runAsync('DELETE FROM capsule_dismissed WHERE capsule_id = ?', [capsuleId]);
+  const now = Date.now();
+  await db.runAsync(
+    `UPDATE capsule_dismissed SET deleted_at = ?, updated_at = ?
+      WHERE capsule_id = ? AND deleted_at IS NULL`,
+    [now, now, capsuleId]
+  );
 }
 
 /** Item ids already ticked off this capsule's packing list. */
 export async function packedItems(db: SQLiteDatabase, capsuleId: string): Promise<string[]> {
   const rows = await db.getAllAsync<{ item_id: string }>(
-    'SELECT item_id FROM capsule_packed WHERE capsule_id = ?',
+    'SELECT item_id FROM capsule_packed WHERE capsule_id = ? AND deleted_at IS NULL',
     [capsuleId]
   );
   return rows.map((r) => r.item_id);
@@ -245,26 +277,38 @@ export async function setPacked(
 ): Promise<void> {
   if (packed) {
     await db.runAsync(
-      'INSERT OR REPLACE INTO capsule_packed (capsule_id, item_id, packed_at) VALUES (?, ?, ?)',
-      [capsuleId, itemId, Date.now()]
+      `INSERT INTO capsule_packed (capsule_id, item_id, packed_at, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (capsule_id, item_id) DO UPDATE SET
+         deleted_at = NULL, packed_at = excluded.packed_at, updated_at = excluded.updated_at`,
+      [capsuleId, itemId, Date.now(), Date.now()]
     );
     return;
   }
-  await db.runAsync('DELETE FROM capsule_packed WHERE capsule_id = ? AND item_id = ?', [
-    capsuleId,
-    itemId,
-  ]);
+  const now = Date.now();
+  await db.runAsync(
+    `UPDATE capsule_packed SET deleted_at = ?, updated_at = ?
+      WHERE capsule_id = ? AND item_id = ?`,
+    [now, now, capsuleId, itemId]
+  );
 }
 
 /** Unpack everything — for reusing a capsule on the next trip. */
 export async function resetPacked(db: SQLiteDatabase, capsuleId: string): Promise<void> {
-  await db.runAsync('DELETE FROM capsule_packed WHERE capsule_id = ?', [capsuleId]);
+  const now = Date.now();
+  await db.runAsync(
+    `UPDATE capsule_packed SET deleted_at = ?, updated_at = ?
+      WHERE capsule_id = ? AND deleted_at IS NULL`,
+    [now, now, capsuleId]
+  );
 }
 
 /** Capsule ids an outfit already belongs to, for the add-to-capsule sheet. */
 export async function capsulesForOutfit(db: SQLiteDatabase, outfitId: string): Promise<string[]> {
   const rows = await db.getAllAsync<{ capsule_id: string }>(
-    'SELECT capsule_id FROM capsule_outfits WHERE outfit_id = ?',
+    `SELECT co.capsule_id FROM capsule_outfits co
+       JOIN capsules c ON c.id = co.capsule_id
+      WHERE co.outfit_id = ? AND co.deleted_at IS NULL AND c.deleted_at IS NULL`,
     [outfitId]
   );
   return rows.map((r) => r.capsule_id);

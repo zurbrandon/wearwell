@@ -15,11 +15,13 @@ export async function listOutfits(
   db: SQLiteDatabase,
   scope: OutfitScope = 'active'
 ): Promise<Outfit[]> {
-  const where =
-    scope === 'active' ? 'WHERE archived_at IS NULL' : scope === 'archived' ? 'WHERE archived_at IS NOT NULL' : '';
+  const scoped =
+    scope === 'active' ? 'AND archived_at IS NULL' :
+    scope === 'archived' ? 'AND archived_at IS NOT NULL' : '';
 
   const rows = await db.getAllAsync<OutfitRow>(
-    `SELECT * FROM outfits ${where} ORDER BY favorite DESC, created_at DESC`
+    `SELECT * FROM outfits WHERE deleted_at IS NULL ${scoped}
+      ORDER BY favorite DESC, created_at DESC`
   );
   if (!rows.length) return [];
 
@@ -29,6 +31,7 @@ export async function listOutfits(
        FROM outfit_items oi
        JOIN items i ON i.id = oi.item_id
       WHERE oi.outfit_id IN (${ids.map(() => '?').join(', ')})
+        AND i.deleted_at IS NULL
       ORDER BY oi.position ASC`,
     ids
   );
@@ -44,13 +47,17 @@ export async function listOutfits(
 }
 
 export async function getOutfit(db: SQLiteDatabase, id: string): Promise<Outfit | null> {
-  const row = await db.getFirstAsync<OutfitRow>('SELECT * FROM outfits WHERE id = ?', [id]);
+  const row = await db.getFirstAsync<OutfitRow>(
+    'SELECT * FROM outfits WHERE id = ? AND deleted_at IS NULL',
+    [id]
+  );
   if (!row) return null;
 
   const joins = await db.getAllAsync<ItemRow & { slot: string }>(
     `SELECT oi.slot, i.* FROM outfit_items oi
        JOIN items i ON i.id = oi.item_id
-      WHERE oi.outfit_id = ? ORDER BY oi.position ASC`,
+      WHERE oi.outfit_id = ? AND i.deleted_at IS NULL
+      ORDER BY oi.position ASC`,
     [id]
   );
 
@@ -84,16 +91,18 @@ export async function createOutfit(
   return id;
 }
 
+/** Soft delete — see deleteItem in items.ts for why. */
 export async function deleteOutfit(db: SQLiteDatabase, id: string): Promise<void> {
-  await db.runAsync('DELETE FROM outfits WHERE id = ?', [id]);
+  const now = Date.now();
+  await db.runAsync('UPDATE outfits SET deleted_at = ?, updated_at = ? WHERE id = ?', [now, now, id]);
 }
 
 export async function setFavorite(db: SQLiteDatabase, id: string, favorite: boolean): Promise<void> {
-  await db.runAsync('UPDATE outfits SET favorite = ? WHERE id = ?', [favorite ? 1 : 0, id]);
+  await db.runAsync('UPDATE outfits SET favorite = ?, updated_at = ? WHERE id = ?', [favorite ? 1 : 0, Date.now(), id]);
 }
 
 export async function renameOutfit(db: SQLiteDatabase, id: string, name: string | null): Promise<void> {
-  await db.runAsync('UPDATE outfits SET name = ? WHERE id = ?', [name, id]);
+  await db.runAsync('UPDATE outfits SET name = ?, updated_at = ? WHERE id = ?', [name, Date.now(), id]);
 }
 
 /**
@@ -121,18 +130,20 @@ export async function archiveOutfits(
 export async function clearableCount(db: SQLiteDatabase): Promise<number> {
   const row = await db.getFirstAsync<{ n: number }>(
     `SELECT COUNT(*) AS n FROM outfits
-      WHERE archived_at IS NULL AND favorite = 0
-        AND id NOT IN (SELECT outfit_id FROM capsule_outfits)`
+      WHERE archived_at IS NULL AND deleted_at IS NULL AND favorite = 0
+        AND id NOT IN (
+          SELECT outfit_id FROM capsule_outfits WHERE deleted_at IS NULL
+        )`
   );
   return row?.n ?? 0;
 }
 
 export async function archiveOutfit(db: SQLiteDatabase, id: string): Promise<void> {
-  await db.runAsync('UPDATE outfits SET archived_at = ? WHERE id = ?', [Date.now(), id]);
+  await db.runAsync('UPDATE outfits SET archived_at = ?, updated_at = ? WHERE id = ?', [Date.now(), Date.now(), id]);
 }
 
 export async function restoreOutfit(db: SQLiteDatabase, id: string): Promise<void> {
-  await db.runAsync('UPDATE outfits SET archived_at = NULL WHERE id = ?', [id]);
+  await db.runAsync('UPDATE outfits SET archived_at = NULL, updated_at = ? WHERE id = ?', [Date.now(), id]);
 }
 
 /** Marks an outfit worn, and rolls the wear through to each item in it. */
@@ -140,13 +151,14 @@ export async function markWorn(db: SQLiteDatabase, id: string): Promise<void> {
   const now = Date.now();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      'UPDATE outfits SET worn_count = worn_count + 1, last_worn_at = ? WHERE id = ?',
-      [now, id]
+      'UPDATE outfits SET worn_count = worn_count + 1, last_worn_at = ?, updated_at = ? WHERE id = ?',
+      [now, now, id]
     );
     await db.runAsync(
-      `UPDATE items SET wear_count = wear_count + 1, last_worn_at = ?
-        WHERE id IN (SELECT item_id FROM outfit_items WHERE outfit_id = ?)`,
-      [now, id]
+      `UPDATE items SET wear_count = wear_count + 1, last_worn_at = ?, updated_at = ?
+        WHERE deleted_at IS NULL
+          AND id IN (SELECT item_id FROM outfit_items WHERE outfit_id = ?)`,
+      [now, now, id]
     );
   });
 }
@@ -159,7 +171,7 @@ export async function outfitsForItem(db: SQLiteDatabase, itemId: string): Promis
   const rows = await db.getAllAsync<OutfitRow>(
     `SELECT o.* FROM outfit_items oi
        JOIN outfits o ON o.id = oi.outfit_id
-      WHERE oi.item_id = ?
+      WHERE oi.item_id = ? AND o.deleted_at IS NULL
       ORDER BY o.created_at DESC`,
     [itemId]
   );
@@ -171,6 +183,7 @@ export async function outfitsForItem(db: SQLiteDatabase, itemId: string): Promis
        FROM outfit_items oi
        JOIN items i ON i.id = oi.item_id
       WHERE oi.outfit_id IN (${ids.map(() => '?').join(', ')})
+        AND i.deleted_at IS NULL
       ORDER BY oi.position ASC`,
     ids
   );
@@ -190,14 +203,17 @@ export async function activeOutfitItemIds(db: SQLiteDatabase): Promise<Set<strin
   const rows = await db.getAllAsync<{ item_id: string }>(
     `SELECT DISTINCT oi.item_id FROM outfit_items oi
        JOIN outfits o ON o.id = oi.outfit_id
-      WHERE o.archived_at IS NULL`
+      WHERE o.archived_at IS NULL AND o.deleted_at IS NULL`
   );
   return new Set(rows.map((r) => r.item_id));
 }
 
 export async function countOutfits(db: SQLiteDatabase, scope: OutfitScope = 'active'): Promise<number> {
-  const where =
-    scope === 'active' ? 'WHERE archived_at IS NULL' : scope === 'archived' ? 'WHERE archived_at IS NOT NULL' : '';
-  const row = await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM outfits ${where}`);
+  const scoped =
+    scope === 'active' ? 'AND archived_at IS NULL' :
+    scope === 'archived' ? 'AND archived_at IS NOT NULL' : '';
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM outfits WHERE deleted_at IS NULL ${scoped}`
+  );
   return row?.n ?? 0;
 }

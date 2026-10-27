@@ -4,7 +4,13 @@ import { toItem, type ItemRow } from '@/db/rows';
 import type { Category, Pattern, Season } from '@/lib/taxonomy';
 import type { Item, NewItem } from '@/lib/types';
 
-const SELECT = 'SELECT * FROM items';
+/**
+ * Every read excludes tombstones. A soft-deleted row stays in the table so the
+ * delete can be synced to other devices, but it is gone as far as the app is
+ * concerned.
+ */
+const LIVE = 'deleted_at IS NULL';
+const SELECT = `SELECT * FROM items WHERE ${LIVE}`;
 
 function newId(): string {
   return `itm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
@@ -93,7 +99,7 @@ export async function listItems(db: SQLiteDatabase, filter: ItemFilter = {}): Pr
     args.push(Date.now());
   }
 
-  const sql = [SELECT, where.length ? `WHERE ${where.join(' AND ')}` : '', 'ORDER BY created_at DESC']
+  const sql = [SELECT, where.length ? `AND ${where.join(' AND ')}` : '', 'ORDER BY created_at DESC']
     .filter(Boolean)
     .join(' ');
 
@@ -102,7 +108,7 @@ export async function listItems(db: SQLiteDatabase, filter: ItemFilter = {}): Pr
 }
 
 export async function getItem(db: SQLiteDatabase, id: string): Promise<Item | null> {
-  const row = await db.getFirstAsync<ItemRow>(`${SELECT} WHERE id = ?`, [id]);
+  const row = await db.getFirstAsync<ItemRow>(`${SELECT} AND id = ?`, [id]);
   return row ? toItem(row) : null;
 }
 
@@ -207,8 +213,17 @@ export async function updateItem(
   await db.runAsync(`UPDATE items SET ${sets.join(', ')} WHERE id = ?`, args);
 }
 
+/**
+ * Soft delete: the row is tombstoned, not removed.
+ *
+ * A hard delete is invisible to sync — another device cannot tell "deleted
+ * here" from "not created here yet", so the row comes back on the next pull.
+ * The photo is removed immediately regardless; the tombstone is for the sync
+ * engine, and nothing needs the image once the user has said delete.
+ */
 export async function deleteItem(db: SQLiteDatabase, id: string): Promise<void> {
-  await db.runAsync('DELETE FROM items WHERE id = ?', [id]);
+  const now = Date.now();
+  await db.runAsync('UPDATE items SET deleted_at = ?, updated_at = ? WHERE id = ?', [now, now, id]);
 }
 
 /** `until` of null benches indefinitely — it stays out until brought back. */
@@ -225,21 +240,21 @@ export async function unbenchItem(db: SQLiteDatabase, id: string): Promise<void>
 }
 
 export async function countItems(db: SQLiteDatabase): Promise<number> {
-  const row = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM items');
+  const row = await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM items WHERE ${LIVE}`);
   return row?.n ?? 0;
 }
 
 /** Relative image paths still referenced by an item. */
 export async function referencedImages(db: SQLiteDatabase): Promise<Set<string>> {
   const rows = await db.getAllAsync<{ image_uri: string }>(
-    'SELECT image_uri FROM items WHERE image_uri IS NOT NULL'
+    `SELECT image_uri FROM items WHERE image_uri IS NOT NULL AND ${LIVE}`
   );
   return new Set(rows.map((r) => r.image_uri));
 }
 
 /** Every tag in use, most-used first — powers tag autocomplete on the editor. */
 export async function allTags(db: SQLiteDatabase): Promise<string[]> {
-  const rows = await db.getAllAsync<{ tags: string }>('SELECT tags FROM items');
+  const rows = await db.getAllAsync<{ tags: string }>(`SELECT tags FROM items WHERE ${LIVE}`);
   const counts = new Map<string, number>();
 
   for (const row of rows) {

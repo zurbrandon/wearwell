@@ -24,6 +24,9 @@ export const BACKUP_TABLES = [
   'capsules',
   'capsule_outfits',
   'capsule_packed',
+  // Added in migration v4 but never exported, so dismissed suggestions were
+  // silently absent from every backup taken since.
+  'capsule_dismissed',
 ] as const;
 
 export type BackupTable = (typeof BACKUP_TABLES)[number];

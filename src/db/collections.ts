@@ -8,9 +8,9 @@ import type { Collection, Outfit } from '@/lib/types';
 
 /** The WHERE clause selecting each built-in collection's outfits. */
 const VIRTUAL_WHERE: Record<VirtualCollectionId, string> = {
-  all: 'o.archived_at IS NULL',
-  favorites: 'o.archived_at IS NULL AND o.favorite = 1',
-  archived: 'o.archived_at IS NOT NULL',
+  all: 'o.deleted_at IS NULL AND o.archived_at IS NULL',
+  favorites: 'o.deleted_at IS NULL AND o.archived_at IS NULL AND o.favorite = 1',
+  archived: 'o.deleted_at IS NULL AND o.archived_at IS NOT NULL',
 };
 
 async function virtualPreview(db: SQLiteDatabase, id: VirtualCollectionId): Promise<string[]> {
@@ -19,7 +19,7 @@ async function virtualPreview(db: SQLiteDatabase, id: VirtualCollectionId): Prom
        FROM outfits o
        JOIN outfit_items oi ON oi.outfit_id = o.id
        JOIN items i ON i.id = oi.item_id
-      WHERE ${VIRTUAL_WHERE[id]} AND i.image_uri IS NOT NULL
+      WHERE ${VIRTUAL_WHERE[id]} AND i.image_uri IS NOT NULL AND i.deleted_at IS NULL
       ORDER BY o.created_at DESC
       LIMIT 4`
   );
@@ -36,7 +36,7 @@ export async function listCollections(db: SQLiteDatabase): Promise<Collection[]>
        SUM(CASE WHEN archived_at IS NULL THEN 1 ELSE 0 END) AS n_all,
        SUM(CASE WHEN archived_at IS NULL AND favorite = 1 THEN 1 ELSE 0 END) AS n_fav,
        SUM(CASE WHEN archived_at IS NOT NULL THEN 1 ELSE 0 END) AS n_arch
-     FROM outfits`
+     FROM outfits WHERE deleted_at IS NULL`
   );
 
   const built: Collection[] = [
@@ -116,6 +116,7 @@ export async function collectionOutfits(db: SQLiteDatabase, id: string): Promise
           `SELECT o.* FROM capsule_outfits co
              JOIN outfits o ON o.id = co.outfit_id
             WHERE co.capsule_id = ?
+              AND co.deleted_at IS NULL AND o.deleted_at IS NULL
             ORDER BY co.added_at DESC`,
           [id]
         )
@@ -133,6 +134,7 @@ export async function collectionOutfits(db: SQLiteDatabase, id: string): Promise
        FROM outfit_items oi
        JOIN items i ON i.id = oi.item_id
       WHERE oi.outfit_id IN (${ids.map(() => '?').join(', ')})
+        AND i.deleted_at IS NULL
       ORDER BY oi.position ASC`,
     ids
   );
