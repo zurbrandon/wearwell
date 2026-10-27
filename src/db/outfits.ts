@@ -73,11 +73,18 @@ export async function createOutfit(
   meta: { name?: string | null; note?: string | null } = {}
 ): Promise<string> {
   const id = newId();
+  const now = Date.now();
 
   await db.withTransactionAsync(async () => {
+    // updated_at must be set explicitly. It arrived in migration v5 as
+    // `NOT NULL DEFAULT 0` — a default ALTER TABLE required in order to add a
+    // non-null column to existing rows, which the migration then backfilled.
+    // New rows get no such backfill, so leaving it out here wrote 0, and a
+    // sync pull asking for `updated_at > lastSync` would never have seen the
+    // outfit at all.
     await db.runAsync(
-      'INSERT INTO outfits (id, name, note, created_at, favorite, worn_count) VALUES (?, ?, ?, ?, 0, 0)',
-      [id, meta.name ?? null, meta.note ?? null, Date.now()]
+      'INSERT INTO outfits (id, name, note, created_at, updated_at, favorite, worn_count) VALUES (?, ?, ?, ?, ?, 0, 0)',
+      [id, meta.name ?? null, meta.note ?? null, now, now]
     );
 
     for (const [position, entry] of entries.entries()) {
