@@ -59,6 +59,37 @@ export type ImportSummary = Record<BackupTable, number>;
  * adds what's missing. Nothing is ever deleted, so an import can't itself
  * destroy data — which matters when the whole point is not losing any.
  */
+/** Where a table's `updated_at` comes from when a backup predates the column. */
+const CREATED_COLUMN: Partial<Record<BackupTable, string>> = {
+  outfits: 'created_at',
+  capsule_outfits: 'added_at',
+  capsule_packed: 'packed_at',
+  capsule_dismissed: 'dismissed_at',
+};
+
+/**
+ * Supplies `updated_at` for rows from a backup taken before the column existed.
+ *
+ * Backups made by build 1 have no `updated_at` on outfits or the join tables —
+ * it arrived in migration v5. INSERT OR REPLACE would fall through to the
+ * column default of 0, and a row stamped 0 is invisible to a sync pull asking
+ * for `updated_at > lastSync`. The migration backfills exactly this way for
+ * rows already on the device; a restore has to do the same, or recovering from
+ * a backup would quietly produce data that never syncs.
+ *
+ * `deleted_at` needs no such care: it is nullable, and NULL means live.
+ */
+export function withSyncColumns(
+  table: BackupTable,
+  row: Record<string, unknown>
+): Record<string, unknown> {
+  const source = CREATED_COLUMN[table];
+  if (!source || 'updated_at' in row) return row;
+
+  const origin = row[source];
+  return { ...row, updated_at: typeof origin === 'number' ? origin : Date.now() };
+}
+
 export async function importData(db: SQLiteDatabase, backup: BackupData): Promise<ImportSummary> {
   if (backup.schemaVersion > BACKUP_SCHEMA_VERSION) {
     throw new Error(
@@ -74,13 +105,14 @@ export async function importData(db: SQLiteDatabase, backup: BackupData): Promis
       summary[table] = 0;
 
       for (const row of rows) {
-        const columns = Object.keys(row);
+        const restored = withSyncColumns(table, row);
+        const columns = Object.keys(restored);
         if (!columns.length) continue;
 
         await db.runAsync(
           `INSERT OR REPLACE INTO ${table} (${columns.join(', ')})
            VALUES (${columns.map(() => '?').join(', ')})`,
-          columns.map((column) => row[column] as string | number | null)
+          columns.map((column) => restored[column] as string | number | null)
         );
         summary[table] += 1;
       }
