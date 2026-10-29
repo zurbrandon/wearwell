@@ -54,7 +54,8 @@
           "recordAudioAndroidPermission": false
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -64,6 +65,11 @@
       "router": {},
       "eas": {
         "projectId": "7d7a40d9-6ebe-4938-9dba-f286f3a25427"
+      },
+      "foundation": {
+        "_comment": "Public by design: the anon key ships in every client bundle and grants nothing on its own. Authority comes from the user's JWT. Never put a service_role key here.",
+        "url": "https://snjtutnadjrnjekfcuft.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuanR1dG5hZGpybmpla2ZjdWZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwNTcyMDQsImV4cCI6MjEwODYzMzIwNH0.FoXqhX4UrM8benzbqtNkF7hpX8F_tX8meYNGI9OMiP0"
       }
     },
     "owner": "brandonarnold"

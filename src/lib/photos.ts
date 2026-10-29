@@ -14,6 +14,10 @@ const IMAGE_DIR = 'closet-images';
 
 /** Longest edge, in px. Plenty for a full-bleed card on a 3x phone. */
 const MAX_EDGE = 1400;
+// What gets sent for tagging: a vision model tiles at 768px, so a larger
+// upload costs time and battery without improving the result.
+const TAG_EDGE = 1024;
+const TAG_QUALITY = 0.7;
 const QUALITY = 0.82;
 
 function imageDirectory(): Directory {
@@ -146,4 +150,28 @@ export function deleteImage(relativePath: string | null | undefined): void {
   } catch {
     // A missing file is fine — we're deleting it anyway.
   }
+}
+
+/**
+ * A downscaled copy of a stored photo, as base64, for sending to an API.
+ *
+ * Deliberately smaller than what is kept on disk. Stored photos run to
+ * MAX_EDGE so the closet looks good; a vision model tiles at 768px, so
+ * anything beyond TAG_EDGE is upload time and battery for no better tags.
+ * The file on disk is untouched.
+ */
+export async function imageAsBase64(relativePath: string): Promise<string> {
+  const uri = resolveImageUri(relativePath);
+  if (!uri) throw new Error('That photo is no longer on this device');
+
+  const context = ImageManipulator.manipulate(uri).resize({ width: TAG_EDGE });
+  const rendered = await context.renderAsync();
+  const saved = await rendered.saveAsync({
+    format: SaveFormat.JPEG,
+    compress: TAG_QUALITY,
+    base64: true,
+  });
+
+  if (!saved.base64) throw new Error('Could not read that photo');
+  return saved.base64;
 }

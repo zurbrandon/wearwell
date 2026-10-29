@@ -116,8 +116,9 @@ export default function SettingsScreen() {
         <View style={[styles.notice, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
           <Icon name="externaldrive.fill" size={18} color={theme.textSecondary} />
           <ThemedText type="small" themeColor="textSecondary" style={{ flex: 1, lineHeight: 20 }}>
-            Everything lives on this phone — there is no account and nothing is stored anywhere
-            else. A backup is the only copy that survives deleting the app.
+            Your closet lives on this phone, and a backup is the only copy that survives
+            deleting the app. The one exception is “Fill in from photo” — that sends the
+            photo away to be read, and only when you tap it.
           </ThemedText>
         </View>
 

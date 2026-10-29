@@ -2,6 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import {
   ActionSheetIOS,
+  ActivityIndicator,
   Alert,
   Platform,
   Pressable,
@@ -17,7 +18,8 @@ import { Field, Section } from '@/components/ui/field';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { captureImage, type PickSource } from '@/lib/photos';
+import { aiAvailable, describeFailure, tagGarment } from '@/lib/foundation';
+import { captureImage, imageAsBase64, type PickSource } from '@/lib/photos';
 import {
   CATEGORIES,
   CATEGORY_LABEL,
@@ -80,6 +82,7 @@ export function ItemForm({
   const theme = useTheme();
   const [tagInput, setTagInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tagging, setTagging] = useState(false);
 
   const patch = (next: Partial<ItemDraft>) => onChange({ ...draft, ...next });
 
@@ -95,6 +98,46 @@ export function ItemForm({
       Alert.alert('Could not add photo', String((error as Error).message ?? error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * Fill the form in from the photo.
+   *
+   * Opt-in per photo, never automatic: this is the only thing in Wearwell that
+   * sends anything off the device, and it sends a picture of someone's
+   * clothes. It also only ever *fills* fields — anything already typed is
+   * left alone, so tapping it can't overwrite work.
+   */
+  async function fillFromPhoto() {
+    if (!draft.imageUri || tagging) return;
+
+    setTagging(true);
+    try {
+      const base64 = await imageAsBase64(draft.imageUri);
+      const tagged = await tagGarment(base64);
+
+      const next: Partial<ItemDraft> = {};
+      if (tagged.name && !draft.name.trim()) next.name = tagged.name;
+      if (tagged.category) next.category = tagged.category;
+      if (tagged.subcategory && !draft.subcategory) next.subcategory = tagged.subcategory;
+      if (tagged.colors?.length && !draft.colors.length) next.colors = tagged.colors;
+      if (tagged.pattern) next.pattern = tagged.pattern;
+      if (tagged.formality) next.formality = tagged.formality;
+      if (tagged.seasons?.length && !draft.seasons.length) next.seasons = tagged.seasons;
+
+      if (Object.keys(next).length === 0) {
+        Alert.alert('Nothing to add', 'The photo didn’t tell us anything you haven’t filled in.');
+        return;
+      }
+
+      patch(next);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      const { title, message } = describeFailure(error);
+      Alert.alert(title, message);
+    } finally {
+      setTagging(false);
     }
   }
 
@@ -154,6 +197,32 @@ export function ItemForm({
           </ThemedText>
         </View>
       </Pressable>
+
+      {draft.imageUri && aiAvailable() ? (
+        <Pressable
+          onPress={fillFromPhoto}
+          disabled={tagging}
+          accessibilityRole="button"
+          accessibilityLabel="Fill in the details from this photo"
+          accessibilityState={{ busy: tagging }}
+          style={({ pressed }) => [
+            styles.magic,
+            {
+              backgroundColor: theme.backgroundElement,
+              borderColor: theme.border,
+              opacity: pressed || tagging ? 0.7 : 1,
+            },
+          ]}>
+          {tagging ? (
+            <ActivityIndicator size="small" color={theme.textSecondary} />
+          ) : (
+            <Icon name="wand.and.stars" size={16} color={theme.accent} />
+          )}
+          <ThemedText type="small" style={{ fontWeight: '600' }}>
+            {tagging ? 'Reading the photo…' : 'Fill in from photo'}
+          </ThemedText>
+        </Pressable>
+      ) : null}
 
       <Field
         label="Name"
@@ -331,6 +400,15 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 3,
     borderRadius: Radius.lg,
     overflow: 'hidden',
+  },
+  magic: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    height: 44,
+    borderRadius: Radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   photoAction: {
     position: 'absolute',
